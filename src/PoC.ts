@@ -12,30 +12,20 @@ const SCOPES = [
 const paymentFrequency = 30; // days
 const monthlyPrice = 12000;
 
-console.log(
-  'GOOGLE_SERVICE_ACCOUNT_EMAIL',
-  process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
-);
-console.log('process.env.GOOGLE_PRIVATE_KEY', process.env.GOOGLE_PRIVATE_KEY);
-
 const jwtFromEnv = new JWT({
-  //   email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
   email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  //   key: process.env.GOOGLE_PRIVATE_KEY,
   key: process.env.GOOGLE_PRIVATE_KEY!.split(String.raw`\n`).join('\n'),
   scopes: SCOPES,
 });
 
-const main = async () => {
+export const main = async () => {
   const doc = new GoogleSpreadsheet(
     process.env.GOOGLE_SPREADSHEET_ID as string,
     jwtFromEnv
   );
-  await doc.loadInfo(); // loads document properties and worksheets
+  await doc.loadInfo();
   console.log(doc.title);
 
-  // const paymentsData = fetch('https://app.payku.cl/api',)
-  // fetch from this url: https://app.payku.cl/api with this Bearer tkpubd0c5040ebacb24eb9b47d77ba0f
   console.log('fetching payments');
 
   let paymentsData: Transaction[] = [];
@@ -51,7 +41,7 @@ const main = async () => {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: 'Bearer tkpubd0c5040ebacb24eb9b47d77ba0f',
+          Authorization: process.env.PAYKU_TOKEN as string,
         },
         timeout: 60000,
       } as any
@@ -60,7 +50,7 @@ const main = async () => {
     const data = await paymentsResponse.json();
     if (data.status === 'failed') {
       fetching = false;
-      console.log('FETCHING PAYMENTS STOPED', data.message_error);
+      console.log('FETCHING PAYMENTS STOPPED', data.message_error);
       break;
     }
 
@@ -76,7 +66,10 @@ const main = async () => {
 
   let paymentsSheet = doc.sheetsByTitle['Test-Pagos'];
 
-  if (!paymentsSheet) {
+  // if paymentsSheet already exists, delete all content
+  if (paymentsSheet) {
+    console.log('clearing PAYMENTS SHEET');
+    await paymentsSheet.delete();
     console.log('CREATING PAYMENTS SHEET');
     paymentsSheet = await doc.addSheet({
       title: 'Test-Pagos',
@@ -93,7 +86,10 @@ const main = async () => {
     });
   }
 
-  if (!testingSheet) {
+  // if testingSheet already exists, delete all content
+  if (testingSheet) {
+    console.log('clearing testingSheet SHEET');
+    await testingSheet.delete();
     console.log('CREATING TESTING SHEET');
     testingSheet = await doc.addSheet({
       title: 'testing',
@@ -109,6 +105,7 @@ const main = async () => {
         'status',
         'hasGap',
         'whatsappLink',
+        'updatedAt',
       ],
     });
   }
@@ -221,7 +218,8 @@ const main = async () => {
     if (hasGap) {
       const message = `Hola, te escribo de Revive Hogar para recordarte que tienes ${missingPaymentsInMonths} pago(s) pendiente(s). Por favor, regulariza tu situación lo antes posible. Gracias.`;
       const phoneNumber = client.get('Telefono');
-      const whatsappLink = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(
+      const businessNumber = '56939167950';
+      const whatsappLink = `https://wa.me/${businessNumber}?phone=${phoneNumber}&text=${encodeURIComponent(
         message
       )}`;
       row.whatsappLink = whatsappLink;
@@ -233,6 +231,16 @@ const main = async () => {
   try {
     await testingSheet.addRows(rows);
     await paymentsSheet.addRows(rowsByPayment);
+    // add new Date.now() to testing sheet on the column updatedAt
+    await testingSheet.loadCells('L2');
+    let dateCell = testingSheet.getCellByA1('L2');
+    dateCell.value = new Date().toLocaleString('es-CL', {
+      timeZone: 'America/Santiago',
+    });
+    dateCell.textFormat = {
+      bold: true,
+    };
+    await testingSheet.saveUpdatedCells();
   } catch (error) {
     console.log('error adding rows', error);
   }

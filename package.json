@@ -1,21 +1,22 @@
 {
   "name": "revive-payment",
   "version": "0.1.0",
-  "bin": {
-    "revive-payment": "bin/revive-payment.js"
+  "main": "index.js",
+  "engines": {
+    "node": ">=16.0.0"
   },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk",
-    "build-poc": "npx tsc && node ./lib/functions/PoC.js",
-    "poc": "node ./lib/functions/PoC.js"
+    "build-poc": "npx tsc && node ./dist/src/PoC.js",
+    "poc": "node ./dist/src/PoC.js",
+    "deploy": "npx tsc && gcloud run deploy revive-payments --source .",
+    "start": "node index.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.5",
     "@types/node": "20.7.1",
-    "aws-cdk": "2.105.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
@@ -23,10 +24,9 @@
   },
   "dependencies": {
     "@google-cloud/secret-manager": "^5.0.1",
-    "aws-cdk-lib": "2.105.0",
-    "aws-lambda": "^1.0.7",
-    "constructs": "^10.0.0",
+    "child_process": "^1.0.2",
     "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "google-auth-library": "^9.2.0",
     "google-spreadsheet": "^4.1.1",
     "googleapis": "^128.0.0",
