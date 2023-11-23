@@ -10,4 +10,4 @@ cdk.out
 .env
 ./cdk-revive/.env
 ./config/.env
-./config/google-json-auth.json
+config/google-json-auth.json
