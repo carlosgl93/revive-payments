@@ -8,3 +8,6 @@ node_modules
 cdk.out
 .env.json
 .env
+./cdk-revive/.env
+./config/.env
+./config/google-json-auth.json
