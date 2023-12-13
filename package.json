@@ -9,9 +9,10 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
+    "just-cloned": "npm i && cd ./cdk-revive && npm i && cd .. && npm run build-poc",
     "build-poc": "npx tsc && node ./dist/src/PoC.js",
     "poc": "node ./dist/src/PoC.js",
-    "deploy": "npx tsc && gcloud run deploy revive-payments --source .",
+    "deploy": "npx tsc && cd ./cdk-revive && npm run build && cdk deploy",
     "start": "node index.js"
   },
   "devDependencies": {
