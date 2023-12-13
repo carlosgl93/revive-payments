@@ -2,10 +2,10 @@ import { Duration, Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { config } from 'dotenv';
-import {
-  NodejsFunction,
-  NodejsFunctionProps,
-} from 'aws-cdk-lib/aws-lambda-nodejs';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { RestApi, LambdaIntegration } from 'aws-cdk-lib/aws-apigateway';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
 
 export class CdkReviveStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -33,5 +33,22 @@ export class CdkReviveStack extends Stack {
         PAYKU_TOKEN: configOutput?.parsed?.PAYKU_TOKEN as string,
       },
     });
+
+    // to set a trigger for the function based on a cron job:
+    const cronJobRule = new Rule(this, 'RevivePaymentsCronJobTrigger', {
+      schedule: Schedule.cron({
+        minute: '0',
+        hour: '7',
+        weekDay: 'MON',
+      }),
+      targets: [new LambdaFunction(paymentsFunction)],
+    });
+
+    // Create an API Gateway so that the user can get fresh results
+    const api = new RestApi(this, 'RevivePaymentsApi');
+    // We add a get resource to the api
+    const paymentsResource = api.root.addResource('payments');
+    // We add an integration to the resource
+    paymentsResource.addMethod('GET', new LambdaIntegration(paymentsFunction));
   }
 }

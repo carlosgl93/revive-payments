@@ -1,140 +1,73 @@
-import { APIGatewayEvent, Context } from 'aws-lambda';
+import { config } from 'dotenv';
+config();
 
-// import { main } from './PoC';
-import { JWT } from 'google-auth-library';
-import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { Transaction } from '../models/Payment';
+import {
+  monthlyPrice,
+  paymentFrequency,
+  paymentsSheetHeaders,
+  paymentsSheetTitle,
+  testingSheetHeaders,
+  testingSheetTitle,
+} from './consts';
+import { connectToSpreadsheet } from './connectToSpreadsheet';
+import { fetchPaymentsData } from './paymentsFetcher';
+import { sheetReseter } from './sheetReseter';
+import { paymentsDataExtractor } from './paymentsDataExtractor';
 
-export const handler = async (event: APIGatewayEvent, context: Context) => {
-  // main();
-  const SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.file',
-  ];
-
-  const monthlyPrice = 12000;
-
-  const jwtFromEnv = new JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: process.env.GOOGLE_PRIVATE_KEY!.split(String.raw`\n`).join('\n'),
-    scopes: SCOPES,
-  });
-
-  const doc = new GoogleSpreadsheet(
-    process.env.GOOGLE_SPREADSHEET_ID as string,
-    jwtFromEnv
-  );
+export const main = async () => {
+  // connecting to G Sheet
+  const doc = connectToSpreadsheet();
   await doc.loadInfo();
   console.log(doc.title);
-
   console.log('fetching payments');
 
-  let paymentsData: Transaction[] = [];
-  let page = 1;
-  let per_page = 100;
-  let fetching = true;
-  const paymentFrequency = 30;
+  // getting payku transactions from the whole year
+  const paymentsData = await fetchPaymentsData();
 
-  while (fetching) {
-    const paymentsResponse = await fetch(
-      `https://app.payku.cl/api/transaction?date_init=2023-01-01&date_end=2023-12-31&success=true&page=${page}&per_page=${per_page}`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: process.env.PAYKU_TOKEN as string,
-        },
-        timeout: 60000,
-      } as any
-    );
-
-    const data = await paymentsResponse.json();
-    if (data.status === 'failed') {
-      fetching = false;
-      console.log('FETCHING PAYMENTS STOPPED', data.message_error);
-      break;
-    }
-
-    paymentsData = [...paymentsData, ...data.transaction];
-    page++;
-  }
-
-  let clientsTestSheet = doc.sheetsByTitle['Test-Clientes'];
   console.log('FETCHING CLIENTS SHEET ');
+  let clientsTestSheet = doc.sheetsByTitle['Test-Clientes'];
 
-  let testingSheet = doc.sheetsByTitle.testing;
   console.log('FETCHING TESTING SHEET ');
+  let testingSheet = doc.sheetsByTitle.testing;
 
   let paymentsSheet = doc.sheetsByTitle['Test-Pagos'];
 
   // if paymentsSheet already exists, delete all content
   if (paymentsSheet) {
-    console.log('clearing PAYMENTS SHEET');
-    await paymentsSheet.delete();
-    console.log('CREATING PAYMENTS SHEET');
-    paymentsSheet = await doc.addSheet({
-      title: 'Test-Pagos',
-      headerValues: [
-        'full_name',
-        'email',
-        'amount',
-        'created_at',
-        'status',
-        'subject',
-        'daysSinceLastPayment',
-        'daysUntilNextPayment',
-        'hasGap',
-      ],
-    });
+    paymentsSheet = await sheetReseter(
+      doc,
+      paymentsSheet,
+      paymentsSheetTitle,
+      paymentsSheetHeaders
+    );
   }
 
   // if testingSheet already exists, delete all content
   if (testingSheet) {
-    console.log('clearing testingSheet SHEET');
-    await testingSheet.delete();
-    console.log('CREATING TESTING SHEET');
-    testingSheet = await doc.addSheet({
-      title: 'testing',
-      headerValues: [
-        'full_name',
-        'email',
-        'inscripcion',
-        'totalAmountPaid',
-        'monthsPaid',
-        'monthsElapsed',
-        'missingPaymentsInMonths',
-        'daysSinceLastPayment',
-        'daysUntilNextPayment',
-        'status',
-        'hasGap',
-        'whatsappLink',
-        'updatedAt',
-      ],
-    });
+    testingSheet = await sheetReseter(
+      doc,
+      testingSheet,
+      testingSheetTitle,
+      testingSheetHeaders
+    );
   }
 
   const clientsTestData = await clientsTestSheet.getRows();
 
   const longTimeAgo = new Date(2000);
-  const rowsByPayment = paymentsData.map((payment: Transaction) => {
-    const row = {
-      full_name: payment.full_name,
-      email: payment.email,
-      amount: payment.amount,
-      created_at: payment.created_at,
-      status: payment.status,
-      subject: payment.subject,
-    };
-    return row;
-  });
+  const rowsByPayment = paymentsDataExtractor(paymentsData);
 
+  // preping for the testing sheet
   const rows = clientsTestData.map((client: any) => {
     let result: {
+      fullName: string;
       paymentAmount: number;
       paymentDate: Date;
       paymentStatus: string;
       paymentSubject: string;
     } = {
+      fullName: '',
       paymentAmount: 0,
       paymentDate: longTimeAgo,
       paymentStatus: '',
@@ -143,6 +76,8 @@ export const handler = async (event: APIGatewayEvent, context: Context) => {
 
     // const clientPayment = paymentsData.find((payment: Transaction) => payment.email === client.get('Email Contacto'))
     const email = client.get('Email Contacto');
+    // CRITICAL LOGIC VULNERABILITY: IF CLIENT PAYS WITH DIFFERENT EMAIL THAN
+    // THE ONE IN THE CLIENTS SHEET THEY WILL NOT HAVE THE PAYMENTS RECOGNIZED
     const clientPayments = paymentsData.filter(
       (payment: Transaction) => payment.email === email
     );
@@ -153,6 +88,7 @@ export const handler = async (event: APIGatewayEvent, context: Context) => {
       if (createdAtTime - lastPaymentTime > 0) {
         result = {
           ...result,
+          fullName: full_name,
           paymentAmount: t.amount,
           paymentDate: new Date(createdAtTime),
           paymentStatus: t.status,
@@ -161,7 +97,7 @@ export const handler = async (event: APIGatewayEvent, context: Context) => {
       }
     });
 
-    const inscripcion = client.get('Fecha Inscripcion').split('-');
+    // const inscripcion = client.get('Fecha Inscripcion').split('-');
     const inscripcionDateCL = client.get('Fecha Inscripcion');
     const full_name = client.get('Nombre Contacto');
 
@@ -247,19 +183,9 @@ export const handler = async (event: APIGatewayEvent, context: Context) => {
       bold: true,
     };
     await testingSheet.saveUpdatedCells();
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        message: 'success',
-      }),
-    };
   } catch (error) {
-    console.log('error executing payments', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        message: 'An error occurred',
-      }),
-    };
+    console.log('error adding rows', error);
   }
 };
+
+main();
